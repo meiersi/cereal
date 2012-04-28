@@ -15,12 +15,13 @@ import           Criterion.Main
 
 import qualified Data.ByteString.Lazy as L
 import           Data.Serialize
+import qualified Data.Serialize2 as S2
 
 import           Data.Binary (Binary)
 import qualified Data.Binary as Binary
 
-import qualified Data.Sequence as Seq
-import           Data.Tree
+-- import qualified Data.Sequence as Seq
+-- import           Data.Tree
 
 
 ------------------------------------------------------------------------------
@@ -41,6 +42,7 @@ intData n = take n [0..]
 stringData :: Int -> [String]
 stringData n = take n $ cycle ["hello", "world"]
 
+{-
 {-# NOINLINE seqIntData #-}
 seqIntData :: Int -> Seq.Seq Int
 seqIntData = Seq.fromList . intData
@@ -57,23 +59,25 @@ treeIntData n =
        [Node r $ concatMap go [ls, rs]]
      where
        (ls, r:rs) = splitAt (length xs `div` 2) xs
-
+-}
 
 -- benchmarks
 -------------
 
 main :: IO ()
 main = Criterion.Main.defaultMain $ 
-    [ benchmarks "Tree Int memoized "  id         (treeIntData nRepl)
-    , benchmarks "Seq Int memoized "   id         (seqIntData nRepl)
-    , benchmarks "[Int] memoized "     id         (intData nRepl)
-    , benchmarks "[Int] generated "    intData    nRepl
+    -- [ benchmarks "Tree Int memoized "  id         (treeIntData nRepl)
+    -- , benchmarks "Seq Int memoized "   id         (seqIntData nRepl)
+    [ benchmarks "[Int] memoized "     id         (intData nRepl)
+    -- , benchmarks "[Int] generated "    intData    nRepl
     , benchmarks "[String] memoized"   id         (stringData nRepl)
-    , benchmarks "[String] generated"  stringData nRepl
+    -- , benchmarks "[String] generated"  stringData nRepl
     ]
   where
-    benchmarks :: (Binary a, Serialize a) => String -> (b -> a) -> b -> Benchmark
+    benchmarks :: (Binary a, S2.Serialize a, Serialize a) 
+               => String -> (b -> a) -> b -> Benchmark
     benchmarks name f x = bgroup (name ++ show nRepl)
       [ bench "cereal" $ whnf (L.length . encodeLazy . f)  x
+      , bench "flat value" $ whnf (L.length . S2.encodeLazy . f)  x
       , bench "binary" $ whnf (L.length . Binary.encode . f) x
       ]

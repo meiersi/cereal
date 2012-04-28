@@ -25,3 +25,4 @@ executable cereal-bench
                      , criterion
                      , cereal     == 0.3.*
                      , binary     == 0.5.*
+                     , bytestring-builder == 0.1.*
