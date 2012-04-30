@@ -54,10 +54,14 @@ module Data.Serialize.Builder (
     , putWord32host         -- :: Word32 -> Builder
     , putWord64host         -- :: Word64 -> Builder
 
+    -- * UTF-8 encoding
+    , putCharUtf8
+
   ) where
 
 import Data.Monoid
 import Data.Word
+import Data.Bits
 import Foreign.ForeignPtr
 import Foreign.Ptr (Ptr,plusPtr)
 import Foreign.Storable
@@ -217,7 +221,21 @@ ensureFree n = n `seq` withSize $ \ l ->
         flush `append` unsafeLiftIO (const (newBuffer (max n defaultSize)))
 {-# INLINE ensureFree #-}
 
--- | Ensure that @n@ many bytes are available, and then use @f@ to write some
+-- | Ensure that @n@ many bytes are available, and then use @f@ to write at
+-- most @n@ bytes into the memory.
+write :: Int -> (Ptr Word8 -> IO Int) -> Builder
+write n f = ensureFree n `append` unsafeLiftIO (writeBuffer f)
+{-# INLINE write #-}
+
+-- | Write to a buffer and return the number of bytes written.
+writeBuffer :: (Ptr Word8 -> IO Int) -> Buffer -> IO Buffer
+writeBuffer f (Buffer fp o u l) = do
+    n <- withForeignPtr fp (\p -> f (p `plusPtr` (o + u)))
+    return (Buffer fp o (u + n) (l - n))
+{-# INLINE writeBuffer #-}
+
+
+-- | Ensure that @n@ many bytes are available, and then use @f@ to write @n@
 -- bytes into the memory.
 writeN :: Int -> (Ptr Word8 -> IO ()) -> Builder
 writeN n f = ensureFree n `append` unsafeLiftIO (writeNBuffer n f)
@@ -427,3 +445,32 @@ shiftr_w16 = shiftR
 shiftr_w32 = shiftR
 shiftr_w64 = shiftR
 #endif
+
+
+-- | Encode a 'Char' using UTF-8.
+putCharUtf8 :: Char -> Builder
+putCharUtf8 c = write 4 $ \op -> case ord c of
+    x | x <= 0x7F   -> do
+          poke8 op 0 x
+          return 1
+      | x <= 0x07FF -> do
+          poke8 op 0 $ (x `shiftR` 6) + 0xC0
+          poke8 op 1 $ (x .&. 0x3F)   + 0x80
+          return 2
+      | x <= 0xFFFF -> do
+          poke8 op 0 $ (x `shiftR` 12) + 0xE0
+          poke8 op 1 $ ((x `shiftR` 6) .&. 0x3F) + 0x80
+          poke8 op 2 $ (x .&. 0x3F) + 0x80
+          return 3
+      | otherwise   -> do
+          poke8 op 0 $ (x `shiftR` 18) + 0xF0
+          poke8 op 1 $ ((x `shiftR` 12) .&. 0x3F) + 0x80
+          poke8 op 2 $ ((x `shiftR` 6) .&. 0x3F) + 0x80
+          poke8 op 3 $ (x .&. 0x3F) + 0x80
+          return 4
+
+  where
+    poke8 :: Ptr Word8 -> Int -> Int -> IO ()
+    poke8 op n = pokeByteOff op n . (fromIntegral :: Int -> Word8)
+    {-# INLINE poke8 #-}
+
