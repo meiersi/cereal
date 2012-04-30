@@ -30,7 +30,7 @@ import qualified Data.Binary as Binary
 
 -- | The number of repetitions to consider.
 nRepl :: Int
-nRepl = 1000
+nRepl = 100
 
 -- We use NOINLINE to ensure that GHC has no chance of optimizing too much.
 
