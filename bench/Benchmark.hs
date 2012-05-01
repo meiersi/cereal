@@ -20,6 +20,8 @@ import qualified Data.Serialize2 as S2
 import           Data.Binary (Binary)
 import qualified Data.Binary as Binary
 
+import qualified Data.Binary2 as B2
+
 import qualified Data.Sequence as Seq
 import           Data.Tree
 
@@ -72,10 +74,11 @@ main = Criterion.Main.defaultMain $
     -- , benchmarks "[String] generated"  stringData nRepl
     ]
   where
-    benchmarks :: (Binary a, S2.Serialize a, Serialize a) 
+    benchmarks :: (Binary a, B2.Binary2 a, S2.Serialize a, Serialize a) 
                => String -> (b -> a) -> b -> Benchmark
     benchmarks name f x = bgroup (name ++ show nRepl)
-      [ bench "cereal" $ whnf (L.length . encodeLazy . f)  x
+      [ bench "new binary" $ whnf (L.length . B2.toLazyByteString . f) x
+      , bench "cereal" $ whnf (L.length . encodeLazy . f)  x
       , bench "value stream" $ whnf (L.length . S2.encodeLazy . f)  x
       , bench "binary" $ whnf (L.length . Binary.encode . f) x
       ]
