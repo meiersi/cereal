@@ -18,13 +18,12 @@ module Data.Serialize.Put2 (
       Put
     , PutM(..)
     , Putter
-    -- , runPut
-    -- , runPutM
+    , runPut
+    , runPutM
     , runPutLazy
     , tell
-    {-
     , runPutMLazy
-    , putFlatValueBuilder
+    , putBuilder
     , execPut
 
     -- * Flushing the implicit parse state
@@ -34,6 +33,9 @@ module Data.Serialize.Put2 (
     , putWord8
     , putByteString
     , putLazyByteString
+
+    -- * Unicode characters
+    , putCharUtf8
 
     -- * Big-endian primitives
     , putWord16be
@@ -62,41 +64,41 @@ module Data.Serialize.Put2 (
     , putIntSetOf
     , putMaybeOf
     , putEitherOf
-    -}
     , putListOf
 
   ) where
 
-import Data.Serialize.FlatValue (FlatValueBuilder)
-import qualified Data.Serialize.FlatValue as FV
+import           Data.Serialize.VStream (VStream)
+import qualified Data.Serialize.VStream as VS
+import qualified Data.Serialize.Builder as B
 
 import Control.Applicative
--- import Data.Array.Unboxed
+import Data.Array.Unboxed
 import Data.Monoid
 import Data.Foldable (foldMap)
--- import Data.Word
--- import qualified Data.ByteString        as S
+import Data.Word
+import qualified Data.ByteString        as S
 import qualified Data.ByteString.Lazy   as L
--- import qualified Data.IntMap            as IntMap
--- import qualified Data.IntSet            as IntSet
--- import qualified Data.Map               as Map
--- import qualified Data.Sequence          as Seq
--- import qualified Data.Set               as Set
--- import qualified Data.Tree              as T
+import qualified Data.IntMap            as IntMap
+import qualified Data.IntSet            as IntSet
+import qualified Data.Map               as Map
+import qualified Data.Sequence          as Seq
+import qualified Data.Set               as Set
+import qualified Data.Tree              as T
 
 
 ------------------------------------------------------------------------
 
 -- XXX Strict in builder only. 
-data PairS a = PairS a FlatValueBuilder
+data PairS a = PairS a VStream
 
-sndS :: PairS a -> FlatValueBuilder
+sndS :: PairS a -> VStream
 sndS (PairS _ b) = b
 
--- | The PutM type. A Writer monad over the efficient FlatValueBuilder monoid.
+-- | The PutM type. A Writer monad over the efficient VStream monoid.
 newtype PutM a = Put { unPut :: PairS a }
 
--- | Put merely lifts FlatValueBuilder into a Writer monad, applied to ().
+-- | Put merely lifts VStream into a Writer monad, applied to ().
 type Put = PutM ()
 
 type Putter a = a -> Put
@@ -133,46 +135,51 @@ instance Monad PutM where
         in PairS b (w `mappend` w')
     {-# INLINE (>>) #-}
 
-tell :: Putter FlatValueBuilder
-tell b = Put $ PairS () b
+-- | Add another 'VStream'.
+tellVStream :: Putter VStream
+tellVStream = Put . PairS ()
+{-# INLINE tellVStream #-}
+
+-- | Get the embedded 'VStream'.
+getVStream :: PutM a -> VStream
+getVStream = sndS . unPut
+{-# INLINE getVStream #-}
+
+tell :: Putter B.Builder
+tell b = Put $ PairS () (VS.builder b)
 {-# INLINE tell #-}
 
-putFlatValueBuilder :: Putter FlatValueBuilder
-putFlatValueBuilder = tell
-{-# INLINE putFlatValueBuilder #-}
+putBuilder :: Putter B.Builder
+putBuilder = tell
+{-# INLINE putBuilder #-}
 
 -- | Run the 'Put' monad
-execPut :: PutM a -> FlatValueBuilder
-execPut = sndS . unPut
+execPut :: PutM a -> B.Builder
+execPut = VS.encode . getVStream
 {-# INLINE execPut #-}
 
-{-
 -- | Run the 'Put' monad with a serialiser
 runPut :: Put -> S.ByteString
-runPut = toByteString . sndS . unPut
+runPut = B.toByteString . execPut
 {-# INLINE runPut #-}
 
 -- | Run the 'Put' monad with a serialiser and get its result
 runPutM :: PutM a -> (a, S.ByteString)
-runPutM (Put (PairS f s)) = (f, toByteString s)
+runPutM (Put (PairS f s)) = (f, B.toByteString $ VS.encode s)
 {-# INLINE runPutM #-}
--}
 
 -- | Run the 'Put' monad with a serialiser
 runPutLazy :: Put -> L.ByteString
-runPutLazy = FV.toLazyByteString . sndS . unPut
+runPutLazy = B.toLazyByteString . execPut
 {-# INLINE runPutLazy #-}
 
-{-
 -- | Run the 'Put' monad with a serialiser
 runPutMLazy :: PutM a -> (a, L.ByteString)
-runPutMLazy (Put (PairS f s)) = (f, toLazyByteString s)
+runPutMLazy (Put (PairS f s)) = (f, B.toLazyByteString $ VS.encode s)
 {-# INLINE runPutMLazy #-}
--}
 
 ------------------------------------------------------------------------
 
-{-
 -- | Pop the ByteString we have constructed so far, if any, yielding a
 -- new chunk in the result ByteString.
 flush               :: Put
@@ -181,45 +188,53 @@ flush               = tell B.flush
 
 -- | Efficiently write a byte into the output buffer
 putWord8            :: Putter Word8
-putWord8            = tell . B.singleton
+putWord8            = tellVStream . VS.word8
 {-# INLINE putWord8 #-}
 
 -- | An efficient primitive to write a strict ByteString into the output buffer.
 -- It flushes the current buffer, and writes the argument into a new chunk.
 putByteString       :: Putter S.ByteString
-putByteString       = tell . B.fromByteString
+putByteString       = tellVStream . VS.byteString
 {-# INLINE putByteString #-}
 
 -- | Write a lazy ByteString efficiently, simply appending the lazy
 -- ByteString chunks to the output buffer
 putLazyByteString   :: Putter L.ByteString
-putLazyByteString   = tell . B.fromLazyByteString
+putLazyByteString   = tellVStream . VS.lazyByteString
 {-# INLINE putLazyByteString #-}
+
+-- | Write a 'Char' using UTF-8.
+putCharUtf8         :: Putter Char
+putCharUtf8         = tellVStream . VS.char
+{-# INLINE putCharUtf8 #-}
 
 -- | Write a Word16 in big endian format
 putWord16be         :: Putter Word16
-putWord16be         = tell . B.putWord16be
+putWord16be         = tellVStream . VS.word16
 {-# INLINE putWord16be #-}
-
--- | Write a Word16 in little endian format
-putWord16le         :: Putter Word16
-putWord16le         = tell . B.putWord16le
-{-# INLINE putWord16le #-}
 
 -- | Write a Word32 in big endian format
 putWord32be         :: Putter Word32
-putWord32be         = tell . B.putWord32be
+putWord32be         = tellVStream . VS.word32
 {-# INLINE putWord32be #-}
+
+-- | Write a Word64 in big endian format
+putWord64be         :: Putter Word64
+putWord64be         = tellVStream . VS.word64
+{-# INLINE putWord64be #-}
+
+-- Hmm. In a future serialization library, we should get rid of these
+-- functions. They just clutter the API.
+
+-- | Write a Word16 in little endian format. /Currently slow/
+putWord16le         :: Putter Word16
+putWord16le         = tell . B.putWord16le
+{-# INLINE putWord16le #-}
 
 -- | Write a Word32 in little endian format
 putWord32le         :: Putter Word32
 putWord32le         = tell . B.putWord32le
 {-# INLINE putWord32le #-}
-
--- | Write a Word64 in big endian format
-putWord64be         :: Putter Word64
-putWord64be         = tell . B.putWord64be
-{-# INLINE putWord64be #-}
 
 -- | Write a Word64 in little endian format
 putWord64le         :: Putter Word64
@@ -256,25 +271,22 @@ putWord32host       = tell . B.putWord32host
 putWord64host       :: Putter Word64
 putWord64host       = tell . B.putWord64host
 {-# INLINE putWord64host #-}
--}
+
 
 -- Containers ------------------------------------------------------------------
 
-encodeListOf :: (a -> FlatValueBuilder) -> [a] -> FlatValueBuilder
+encodeListOf :: (a -> VStream) -> [a] -> VStream
 encodeListOf f = -- allow inlining with just a single argument
-    \xs ->  FV.putInt (length xs) `mappend`
-            foldMap f xs
+    \xs ->  VS.int (length xs) `mappend` foldMap f xs
 {-# INLINE encodeListOf #-}
 
 putListOf :: Putter a -> Putter [a]
-putListOf pa = tell . encodeListOf (execPut . pa)
+putListOf pa = tellVStream . encodeListOf (getVStream . pa)
 {-# INLINE putListOf #-}
 
-{-
 putTwoOf :: Putter a -> Putter b -> Putter (a,b)
 putTwoOf pa pb (a,b) = pa a >> pb b
 {-# INLINE putTwoOf #-}
-
 
 putIArrayOf :: (Ix i, IArray a e) => Putter i -> Putter e -> Putter (a i e)
 putIArrayOf pix pe a = do
@@ -283,16 +295,15 @@ putIArrayOf pix pe a = do
 {-# INLINE putIArrayOf #-}
 
 putSeqOf :: Putter a -> Putter (Seq.Seq a)
-putSeqOf pa = \s -> do
-    putWord64be (fromIntegral $ Seq.length s) 
-    tell (foldMap (execPut . pa) s)
+putSeqOf pa = \s ->
+    tellVStream (VS.int (Seq.length s) `mappend` foldMap (getVStream . pa) s)
 {-# INLINE putSeqOf #-}
 
 putTreeOf :: Putter a -> Putter (T.Tree a)
 putTreeOf pa = 
-    tell . go
+    tellVStream . go
   where
-    go (T.Node x cs) = execPut (pa x) `mappend` encodeListOf go cs
+    go (T.Node x cs) = getVStream (pa x) `mappend` encodeListOf go cs
 {-# INLINE putTreeOf #-}
 
 putMapOf :: Ord k => Putter k -> Putter a -> Putter (Map.Map k a)
@@ -320,4 +331,3 @@ putEitherOf :: Putter a -> Putter b -> Putter (Either a b)
 putEitherOf pa _  (Left a)  = putWord8 0 >> pa a
 putEitherOf _  pb (Right b) = putWord8 1 >> pb b
 {-# INLINE putEitherOf #-}
--}

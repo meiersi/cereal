@@ -31,7 +31,7 @@ module Data.Serialize2 (
     -- $example
 
     -- * Serialize serialisation
-    -- , encode
+    , encode
     , encodeLazy
     , decode, decodeLazy
 
@@ -40,7 +40,6 @@ module Data.Serialize2 (
     -- , module Data.Serialize.IEEE754
     ) where
 
-import qualified Data.Serialize.FlatValue as FV
 import Data.Serialize.Put2
 import Data.Serialize.Get
 -- import Data.Serialize.IEEE754
@@ -48,7 +47,7 @@ import Data.Serialize.Get
 import Control.Monad
 import Data.Array.Unboxed
 import Data.ByteString (ByteString)
-import Data.Char    (chr,ord)
+import Data.Char    (chr)
 import Data.List    (unfoldr)
 import Data.Word
 import Foreign
@@ -96,11 +95,9 @@ class Serialize t where
 ------------------------------------------------------------------------
 -- Wrappers to run the underlying monad
 
-{-
 -- | Encode a value using binary serialization to a strict ByteString.
 encode :: Serialize a => a -> ByteString
 encode = runPut . put
--}
 
 -- | Encode a value using binary serialization to a lazy ByteString.
 encodeLazy :: Serialize a => a -> L.ByteString
@@ -122,17 +119,19 @@ decodeLazy  = runGetLazy get
 -- The () type need never be written to disk: values of singleton type
 -- can be reconstructed from the type alone
 instance Serialize () where
+    {-# INLINE put #-}
     put ()  = return ()
     get     = return ()
 
-{-
 -- Bools are encoded as a byte in the range 0 .. 1
 instance Serialize Bool where
+    {-# INLINE put #-}
     put     = putWord8 . fromIntegral . fromEnum
     get     = liftM (toEnum . fromIntegral) getWord8
 
 -- Values of type 'Ordering' are encoded as a byte in the range 0 .. 2
 instance Serialize Ordering where
+    {-# INLINE put #-}
     put     = putWord8 . fromIntegral . fromEnum
     get     = liftM (toEnum . fromIntegral) getWord8
 
@@ -141,60 +140,66 @@ instance Serialize Ordering where
 
 -- Words8s are written as bytes
 instance Serialize Word8 where
+    {-# INLINE put #-}
     put     = putWord8
     get     = getWord8
 
 -- Words16s are written as 2 bytes in big-endian (network) order
 instance Serialize Word16 where
+    {-# INLINE put #-}
     put     = putWord16be
     get     = getWord16be
 
 -- Words32s are written as 4 bytes in big-endian (network) order
 instance Serialize Word32 where
+    {-# INLINE put #-}
     put     = putWord32be
     get     = getWord32be
 
 -- Words64s are written as 8 bytes in big-endian (network) order
 instance Serialize Word64 where
+    {-# INLINE put #-}
     put     = putWord64be
     get     = getWord64be
 
 -- Int8s are written as a single byte.
 instance Serialize Int8 where
-    put i   = put (fromIntegral i :: Word8)
+    {-# INLINE put #-}
+    put     = put . (fromIntegral :: Int8 -> Word8)
     get     = liftM fromIntegral (get :: Get Word8)
 
 -- Int16s are written as a 2 bytes in big endian format
 instance Serialize Int16 where
-    put i   = put (fromIntegral i :: Word16)
+    {-# INLINE put #-}
+    put     = put . (fromIntegral :: Int16 -> Word16)
     get     = liftM fromIntegral (get :: Get Word16)
 
 -- Int32s are written as a 4 bytes in big endian format
 instance Serialize Int32 where
-    put i   = put (fromIntegral i :: Word32)
+    {-# INLINE put #-}
+    put     = put . (fromIntegral :: Int32 -> Word32)
     get     = liftM fromIntegral (get :: Get Word32)
 
 -- Int64s are written as a 8 bytes in big endian format
 instance Serialize Int64 where
-    put i   = put (fromIntegral i :: Word64)
+    {-# INLINE put #-}
+    put     = put . (fromIntegral :: Int64 -> Word64)
     get     = liftM fromIntegral (get :: Get Word64)
 
 ------------------------------------------------------------------------
--}
 
 -- Words are are written as Word64s, that is, 8 bytes in big endian format
 instance Serialize Word where
     {-# INLINE put #-}
-    put   = tell . FV.putWord
+    put   = put . (fromIntegral :: Word -> Word64)
     get   = error "liftM fromIntegral (get :: Get Word64)"
 
 -- Ints are are written as Int64s, that is, 8 bytes in big endian format
 instance Serialize Int where
     {-# INLINE put #-}
-    put  = tell . FV.putInt
+    put  = put . (fromIntegral :: Int -> Word64)
     get  = error "liftM fromIntegral (get :: Get Int64)"
 
-{-
 ------------------------------------------------------------------------
 -- 
 -- Portable, and pretty efficient, serialisation of Integer
@@ -252,14 +257,12 @@ instance (Serialize a,Integral a) => Serialize (R.Ratio a) where
     get = liftM2 (R.%) get get
 
 ------------------------------------------------------------------------
--}
+
 -- Char is serialised as UTF-8
 instance Serialize Char where
     {-# INLINE put #-}
-    put = tell . FV.putChar
+    put = putCharUtf8
 
-    get = error "get: Char"
-    {-
     get = do
         let getByte = liftM (fromIntegral :: Word8 -> Int) get
             shiftL6 = flip shiftL 6 :: Int -> Int
@@ -281,8 +284,7 @@ instance Serialize Char where
                                 return (z .|. shiftL6 (y .|. shiftL6
                                         (x .|. shiftL6 (xor 0xf0 w))))
         return $! chr r
- -}
-{-
+
 ------------------------------------------------------------------------
 -- Instances for the first few tuples
 
@@ -340,7 +342,7 @@ instance (Serialize a, Serialize b, Serialize c, Serialize d, Serialize e,
     put (a,b,c,d,e,f,g,h,i,j) = put (a,(b,c,d,e,f,g,h,i,j))
     get                       = do (a,(b,c,d,e,f,g,h,i,j)) <- get
                                    return (a,b,c,d,e,f,g,h,i,j)
--}
+
 ------------------------------------------------------------------------
 -- Container types
 
@@ -349,7 +351,6 @@ instance Serialize a => Serialize [a] where
     put = putListOf put
     get = getListOf get
 
-{-
 instance (Serialize a) => Serialize (Maybe a) where
     put = putMaybeOf put
     get = getMaybeOf get
@@ -395,6 +396,7 @@ instance (Serialize e) => Serialize (IntMap.IntMap e) where
 -- Queues and Sequences
 
 instance (Serialize e) => Serialize (Seq.Seq e) where
+    {-# INLINE put #-}
     put = putSeqOf put
     get = getSeqOf get
 
@@ -413,6 +415,7 @@ instance Serialize Float where
 -- Trees
 
 instance (Serialize e) => Serialize (T.Tree e) where
+    {-# INLINE put #-}
     put = putTreeOf put
     get = getTreeOf get
 
@@ -555,4 +558,3 @@ instance (SumSize a, SumSize b) => SumSize (a :+: b) where
 instance SumSize (C1 c a) where
     sumSize = Tagged 1
 #endif
--}
