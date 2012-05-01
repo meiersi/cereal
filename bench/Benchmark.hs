@@ -13,7 +13,9 @@ module Main (main) where
 import           Prelude hiding (words)
 import           Criterion.Main
 
-import qualified Data.ByteString.Lazy as L
+import           Data.Binary2.Encoding (renderTextualUtf8)
+import qualified Data.ByteString.Char8 as SC8
+import qualified Data.ByteString.Lazy  as L
 import           Data.Serialize
 import qualified Data.Serialize2 as S2
 

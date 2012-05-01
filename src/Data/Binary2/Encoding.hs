@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns, OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      : Data.Binary.Encoding2
@@ -17,6 +17,7 @@ module Data.Binary2.Encoding (
     -- * Streams of values to be encoded
       VStream
     , render
+    , renderTextualUtf8
 
     -- ** Encoding combinators
 
@@ -50,7 +51,11 @@ module Data.Binary2.Encoding (
 import Prelude hiding (putChar)
 
 import qualified Data.ByteString                                     as S
+import qualified Data.ByteString.Char8                               as SC8
+import qualified Data.ByteString.Lazy                                as L
 import qualified Data.ByteString.Lazy.Builder                        as B
+import qualified Data.ByteString.Lazy.Builder.ASCII                  as B
+import qualified Data.ByteString.Lazy.Builder.Extras                 as B
 import qualified Data.ByteString.Lazy.Builder.Internal               as B
 import qualified Data.ByteString.Lazy.Builder.BasicEncoding          as E
 import qualified Data.ByteString.Lazy.Builder.BasicEncoding.Internal as E
@@ -138,6 +143,29 @@ render fv0 =
 
     bound = max (E.size E.word64LE) $ max (E.sizeBound E.charUtf8) (E.size E.doubleLE)
 
+renderTextualUtf8 :: VStream -> L.ByteString
+renderTextualUtf8 vs0 =
+    B.toLazyByteString $ go (toVStreamRep vs0 VEmpty)
+  where
+    go VEmpty                   = mempty
+    go (VWord8  1 (VChar x vs)) = line "w8,c 1," (B.charUtf8 x) vs
+    go (VWord8  1 (VWord x vs)) = line "w8,w 1," (B.wordDec x) vs
+    go (VWord l (VByteString x vs))
+      | l > 0                   = line "w,bs " (B.wordDec l <> B.char8 ',' <> B.byteStringHexFixed x) vs
+    go (VWord8  x vs)           = line "w8   " (B.word8Dec x)  vs
+    go (VWord16 x vs)           = line "w16  " (B.word16Dec x) vs
+    go (VWord32 x vs)           = line "w32  " (B.word32Dec x) vs
+    go (VWord64 x vs)           = line "w64  " (B.word64Dec x) vs
+    go (VWord   x vs)           = line "w    " (B.wordDec x)   vs
+    go (VChar   x vs)           = line "c    " (B.charUtf8 x)  vs
+    go (VFloat  x vs)           = line "f    " (B.floatDec x)  vs
+    go (VDouble x vs)           = line "d    " (B.doubleDec x) vs
+    go (VInteger x vs)          = line "I    " (B.integerDec x) vs
+    go (VByteString x vs)       = line "bs   " (B.byteStringHexFixed x) vs
+    go (VBuilder x vs)          = line "B    " (B.lazyByteStringHexFixed $ B.toLazyByteString x) vs
+
+    line :: SC8.ByteString -> B.Builder -> VStreamRep -> B.Builder
+    line pre b vs = B.byteStringCopy pre <> b <> B.char8 '\n' <> go vs
 
 
 -- VStream construction
